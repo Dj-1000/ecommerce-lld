@@ -4,7 +4,7 @@ from app.models.catalog import Product, ProductVariant
 from app.models.inventory import Inventory, InventoryReservation, ReservationStatus
 from app.models.order import Order, OrderItem, OrderStatus
 from app.models.payment import Payment, PaymentStatus
-from app.models.user import User
+from app.users.models import User
 
 __all__ = [
     "Address",

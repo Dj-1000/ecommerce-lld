@@ -4,12 +4,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.core.config import settings
 
-DB_URL = getattr(settings, "database_url", None)
-if not DB_URL:
-    raise ValueError("Database URL is not set in the environment variables.")
-
 engine = create_async_engine(
-    DB_URL,
+    settings.database_url,
     pool_pre_ping=True,
 )
 
