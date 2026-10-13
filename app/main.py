@@ -1,12 +1,26 @@
-from fastapi import Depends, FastAPI
-from sqlalchemy import text
-from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.ext.asyncio import AsyncSession
-from app.db.session import engine, get_db
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+from redis.asyncio import Redis
+
+from app.auth.router import router as auth_router
 from app.core.config import settings
+from app.db.session import engine
 
-app = FastAPI(title=settings.app_name)
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    redis = Redis.from_url(settings.redis_url, decode_responses=True)
+    app.state.redis = redis
+    try:
+        await redis.ping()
+        yield
+    finally:
+        await redis.aclose()
+        await engine.dispose()
+
+app = FastAPI(title="LLD E-commerce API", lifespan=lifespan)
+app.include_router(auth_router)
 
 app.get("/health/db")
 async def check_database():
@@ -17,7 +31,7 @@ async def check_database():
             )
             value = result.scalar_one()
 
-        return {
+        return {    
             "database": "connected",
             "query_result": value,
         }

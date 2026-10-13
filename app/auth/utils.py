@@ -1,75 +1,45 @@
-from datetime import datetime, timedelta, timezone
-
 import jwt
-from argon2 import PasswordHasher
-from argon2.exceptions import (
-    InvalidHashError,
-    VerifyMismatchError,
-)
+from typing import Any
 
-from app.auth.constants import (
-    ACCESS_TOKEN_TYPE,
-    REFRESH_TOKEN_TYPE,
-)
+from argon2 import PasswordHasher
+from datetime import datetime, timedelta, timezone
+from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
+
 from app.core.config import settings
 
-
-password_hasher = PasswordHasher()
-
-
-def hash_password(password: str) -> str:
-    return password_hasher.hash(password)
+_password_hasher = PasswordHasher()
 
 
-def verify_password(
-    password_hash: str,
-    password: str,
-) -> bool:
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    if not hashed_password:
+        return False
     try:
-        return password_hasher.verify(
-            password_hash,
-            password,
-        )
-    except (
-        VerifyMismatchError,
-        InvalidHashError,
-    ):
+        return _password_hasher.verify(hashed_password, plain_password)
+    except (VerifyMismatchError, VerificationError, InvalidHashError, TypeError):
         return False
 
 
-def create_access_token(user_id: int) -> str:
+def hash_password(password: str) -> str:
+    return _password_hasher.hash(password)
+
+
+def create_token(*, subject: str, token_type: str, expires_delta: timedelta) -> str:
     now = datetime.now(timezone.utc)
-
-    payload = {
-        "sub": str(user_id),
-        "type": ACCESS_TOKEN_TYPE,
-        "iat": now,
-        "exp": now + timedelta(
-            minutes=settings.access_token_expire_minutes
-        ),
+    payload: dict[str, Any] = {
+        "sub": subject, "type": token_type, "iat": now, "exp": now + expires_delta
     }
+    return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
 
-    return jwt.encode(
-        payload,
-        settings.jwt_secret_key,
-        algorithm=settings.jwt_algorithm,
+
+def create_access_token(subject: str) -> str:
+    return create_token(
+        subject=subject, token_type="access",
+        expires_delta=timedelta(minutes=settings.access_token_expire_minutes),
     )
 
 
-def create_refresh_token(user_id: int) -> str:
-    now = datetime.now(timezone.utc)
-
-    payload = {
-        "sub": str(user_id),
-        "type": REFRESH_TOKEN_TYPE,
-        "iat": now,
-        "exp": now + timedelta(
-            days=settings.refresh_token_expire_days
-        ),
-    }
-
-    return jwt.encode(
-        payload,
-        settings.jwt_secret_key,
-        algorithm=settings.jwt_algorithm,
+def create_refresh_token(subject: str) -> str:
+    return create_token(
+        subject=subject, token_type="refresh",
+        expires_delta=timedelta(days=settings.refresh_token_expire_days),
     )

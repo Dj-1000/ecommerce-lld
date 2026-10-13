@@ -1,123 +1,51 @@
-import asyncio
-
+from fastapi import HTTPException, status
+from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.exceptions import InvalidCredentialsError
-from app.auth.rate_limiter import (
-    clear_successful_login_failures,
-    get_lock_ttl,
-    get_scope_ids,
-    register_failure,
-)
-from app.auth.utils import (
-    create_access_token,
-    create_refresh_token,
-    verify_password,
-)
+from app.auth.rate_limiter import LoginRateLimiter
+from app.auth.schemas import LoginRequest, TokenResponse
+from app.auth.utils import create_access_token, create_refresh_token, verify_password
+from app.core.config import settings
 from app.users.models import User
 
-
-# Used when the requested account does not exist.
-#
-# IMPORTANT:
-# Generate this once, not for every request.
-DUMMY_PASSWORD_HASH = (
-    "$argon2id$v=19$m=65536,t=3,p=4$"
-    "..."
-)
+INVALID_CREDENTIALS = "Invalid email or password."
+LOGIN_TEMPORARILY_BLOCKED = "Too many failed login attempts. Try again later."
 
 
-async def authenticate(
-    session: AsyncSession,
-    redis_client,
-    email: str,
-    password: str,
-    ip: str,
-):
-    email = email.strip().lower()
+async def login_user(
+    *, payload: LoginRequest, db: AsyncSession, redis: Redis, ip_address: str
+) -> TokenResponse:
+    email = str(payload.email).strip().lower()
+    limiter = LoginRateLimiter(redis)
 
-    scope_ids = get_scope_ids(
-        email=email,
-        ip=ip,
-    )
-
-    # -----------------------------------------
-    # 1. Check all rate-limit scopes.
-    # -----------------------------------------
-
-    lock_ttl_ms = await get_lock_ttl(
-        redis_client,
-        scope_ids,
-    )
-
-    if lock_ttl_ms > 0:
-        raise InvalidCredentialsError(
-            "Too many login attempts."
+    if await limiter.is_locked(email, ip_address):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=LOGIN_TEMPORARILY_BLOCKED,
+            headers={"Retry-After": str(limiter.LOCK_SECONDS)},
         )
 
-    # -----------------------------------------
-    # 2. Find user.
-    # -----------------------------------------
-
-    result = await session.execute(
-        select(User).where(
-            User.email == email
-        )
-    )
-
+    result = await db.execute(select(User).where(User.email == email))
     user = result.scalar_one_or_none()
-
-    # -----------------------------------------
-    # 3. Always perform password verification.
-    # -----------------------------------------
-
-    stored_hash = (
-        user.password_hash
-        if user
-        else DUMMY_PASSWORD_HASH
+    password_ok = bool(
+        user is not None
+        and verify_password(payload.password, getattr(user, "hashed_password", ""))
     )
+    account_active = bool(user is not None and getattr(user, "is_active", True))
 
-    password_valid = await asyncio.to_thread(
-        verify_password,
-        stored_hash,
-        password,
-    )
-
-    # -----------------------------------------
-    # 4. Authentication failure.
-    # -----------------------------------------
-
-    if user is None or not password_valid:
-
-        await register_failure(
-            redis_client,
-            scope_ids,
+    if not password_ok or not account_active:
+        await limiter.record_failure(email, ip_address)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=INVALID_CREDENTIALS,
+            headers={"WWW-Authenticate": "Bearer"},
         )
 
-        raise InvalidCredentialsError(
-            "Invalid email or password."
-        )
-
-    # -----------------------------------------
-    # 5. Authentication succeeded.
-    # -----------------------------------------
-
-    await clear_successful_login_failures(
-        redis_client,
-        scope_ids,
+    await limiter.clear_pair_failures(email, ip_address)
+    subject = str(user.id)
+    return TokenResponse(
+        access_token=create_access_token(subject),
+        refresh_token=create_refresh_token(subject),
+        expires_in=settings.access_token_expire_minutes * 60,
     )
-
-    access_token = create_access_token(
-        user.id
-    )
-
-    refresh_token = create_refresh_token(
-        user.id
-    )
-
-    return {
-        "access_token": access_token,
-        "refresh_token": refresh_token,
-        "token_type": "bearer",
-    }
