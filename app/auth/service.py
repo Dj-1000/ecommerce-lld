@@ -14,7 +14,11 @@ LOGIN_TEMPORARILY_BLOCKED = "Too many failed login attempts. Try again later."
 
 
 async def login_user(
-    *, payload: LoginRequest, db: AsyncSession, redis: Redis, ip_address: str
+    *, 
+    payload: LoginRequest, 
+    db: AsyncSession, 
+    redis: Redis, 
+    ip_address: str
 ) -> TokenResponse:
     email = str(payload.email).strip().lower()
     limiter = LoginRateLimiter(redis)
@@ -44,8 +48,9 @@ async def login_user(
 
     await limiter.clear_pair_failures(email, ip_address)
     subject = str(user.id)
+
     return TokenResponse(
-        access_token=create_access_token(subject),
-        refresh_token=create_refresh_token(subject),
-        expires_in=settings.access_token_expire_minutes * 60,
+        access_token = create_access_token(subject),
+        refresh_token = create_refresh_token(subject),
+        expires_in = settings.access_token_expire_minutes * 60,
     )
