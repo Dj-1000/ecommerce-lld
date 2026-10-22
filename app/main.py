@@ -4,11 +4,13 @@ from fastapi import FastAPI
 from redis.asyncio import Redis
 from sqlalchemy import text
 
-from app.auth.router import router as auth_router
-from app.core.config import settings
-from app.core.exceptions import register_exception_handlers
 from app.db.session import engine
+from app.core.config import settings
+from app.auth.router import router as auth_router
+from app.users.router import router as user_router
+from app.core.exceptions import register_exception_handlers
 
+from app.core.logger import logger
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -32,6 +34,7 @@ app = FastAPI(
 )
 register_exception_handlers(app)
 app.include_router(auth_router)
+app.include_router(user_router)
 
 
 @app.get("/health/db")

@@ -4,16 +4,19 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import get_redis
+from app.auth.services.token import logout_session, refresh_token_pair
+from app.core.redis import get_redis
 from app.auth.email_service import send_verification_email
 from app.auth.schemas import (
     LoginRequest,
+    LogoutRequest,
+    RefreshRequest,
     RegisterRequest,
     ResendVerificationRequest,
     TokenResponse,
     VerifyEmailRequest,
 )
-from app.auth.service import (
+from app.auth.services.user import (
     REGISTRATION_MESSAGE,
     VERIFICATION_SENT_MESSAGE,
     VERIFICATION_SUCCESS_MESSAGE,
@@ -135,4 +138,49 @@ async def login(
     return SuccessResponse(
         message="Login successful.",
         data=token_response,
+    )
+
+
+
+@router.post(
+    "/refresh",
+    response_model=SuccessResponse[TokenResponse],
+)
+async def refresh_tokens(
+    payload: RefreshRequest,
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+) -> SuccessResponse[TokenResponse]:
+    
+    tokens = await refresh_token_pair(
+        refresh_token=payload.refresh_token,
+        db=db,
+        redis=redis,
+    )
+
+    return SuccessResponse(
+        message="Tokens refreshed successfully.",
+        data=tokens,
+    )
+
+
+@router.post(
+    "/logout",
+    response_model=SuccessResponse[dict],
+)
+async def logout(
+    payload: LogoutRequest,
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+) -> SuccessResponse[dict]:
+    
+    await logout_session(
+        refresh_token=payload.refresh_token,
+        db=db,
+        redis=redis,
+    )
+
+    return SuccessResponse(
+        message="Logged out successfully.",
+        data={},
     )

@@ -14,6 +14,7 @@ from app.auth.schemas import (
     RegisterRequest,
     TokenResponse,
 )
+from app.auth.services.token import issue_token_pair
 from app.auth.utils import (
     create_access_token,
     create_refresh_token,
@@ -202,7 +203,7 @@ async def login_user(
         select(User).where(User.email == email)
     )
     user = result.scalar_one_or_none()
-
+    
     password_ok = bool(
         user is not None
         and verify_password(
@@ -236,8 +237,8 @@ async def login_user(
 
     subject = str(user.id)
 
-    return TokenResponse(
-        access_token=create_access_token(subject),
-        refresh_token=create_refresh_token(subject),
-        expires_in=settings.access_token_expire_minutes * 60,
+    return await issue_token_pair(
+        user=user,
+        db=db,
+        redis=redis,
     )
