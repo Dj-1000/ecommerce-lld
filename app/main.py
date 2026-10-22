@@ -6,6 +6,7 @@ from sqlalchemy import text
 
 from app.auth.router import router as auth_router
 from app.core.config import settings
+from app.core.exceptions import register_exception_handlers
 from app.db.session import engine
 
 
@@ -29,7 +30,7 @@ app = FastAPI(
     title="LLD E-commerce API",
     lifespan=lifespan,
 )
-
+register_exception_handlers(app)
 app.include_router(auth_router)
 
 

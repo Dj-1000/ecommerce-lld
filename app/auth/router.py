@@ -1,6 +1,6 @@
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -8,9 +8,7 @@ from app.auth.dependencies import get_redis
 from app.auth.email_service import send_verification_email
 from app.auth.schemas import (
     LoginRequest,
-    MessageResponse,
     RegisterRequest,
-    RegisterResponse,
     ResendVerificationRequest,
     TokenResponse,
     VerifyEmailRequest,
@@ -25,31 +23,27 @@ from app.auth.service import (
     verify_email,
 )
 from app.core.config import settings
+from app.core.responses import SuccessResponse
 from app.db.session import get_db
-
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 
 def _verification_url(token: str) -> str:
     query = urlencode({"token": token})
-
-    return (
-        f"{settings.frontend_url.rstrip('/')}"
-        f"/verify-email?{query}"
-    )
+    return f"{settings.frontend_url.rstrip('/')}/verify-email?{query}"
 
 
 @router.post(
     "/register",
-    response_model=RegisterResponse,
+    response_model=SuccessResponse[dict],
     status_code=201,
 )
 async def register(
     payload: RegisterRequest,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
-) -> RegisterResponse:
+) -> SuccessResponse[dict]:
     user, token = await register_user(
         payload=payload,
         db=db,
@@ -61,34 +55,44 @@ async def register(
         verification_url=_verification_url(token),
     )
 
-    return RegisterResponse(message=REGISTRATION_MESSAGE)
+    return SuccessResponse(
+        message=REGISTRATION_MESSAGE,
+        data={
+            "id": user.id,
+            "email": user.email,
+            "email_verified": user.email_verified,
+        },
+    )
 
 
 @router.post(
     "/verify-email",
-    response_model=MessageResponse,
+    response_model=SuccessResponse[dict],
 )
 async def confirm_email(
     payload: VerifyEmailRequest,
     db: AsyncSession = Depends(get_db),
-) -> MessageResponse:
+) -> SuccessResponse[dict]:
     await verify_email(
         token=payload.token,
         db=db,
     )
 
-    return MessageResponse(message=VERIFICATION_SUCCESS_MESSAGE)
+    return SuccessResponse(
+        message=VERIFICATION_SUCCESS_MESSAGE,
+        data={},
+    )
 
 
 @router.post(
     "/email-verification/resend",
-    response_model=MessageResponse,
+    response_model=SuccessResponse[dict],
 )
 async def resend_verification(
     payload: ResendVerificationRequest,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
-) -> MessageResponse:
+) -> SuccessResponse[dict]:
     result = await create_resend_verification_token(
         email=str(payload.email),
         db=db,
@@ -103,21 +107,32 @@ async def resend_verification(
             verification_url=_verification_url(token),
         )
 
-    return MessageResponse(message=VERIFICATION_SENT_MESSAGE)
+    return SuccessResponse(
+        message=VERIFICATION_SENT_MESSAGE,
+        data={},
+    )
 
 
-@router.post("/login", response_model=TokenResponse)
+@router.post(
+    "/login",
+    response_model=SuccessResponse[TokenResponse],
+)
 async def login(
     payload: LoginRequest,
     request: Request,
     db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(get_redis),
-) -> TokenResponse:
+) -> SuccessResponse[TokenResponse]:
     ip_address = request.client.host if request.client else "unknown"
 
-    return await login_user(
+    token_response = await login_user(
         payload=payload,
         db=db,
         redis=redis,
         ip_address=ip_address,
+    )
+
+    return SuccessResponse(
+        message="Login successful.",
+        data=token_response,
     )
