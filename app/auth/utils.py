@@ -1,4 +1,6 @@
 import jwt
+import secrets
+import hashlib
 from typing import Any
 
 from argon2 import PasswordHasher
@@ -42,4 +44,48 @@ def create_refresh_token(subject: str) -> str:
     return create_token(
         subject=subject, token_type="refresh",
         expires_delta=timedelta(days=settings.refresh_token_expire_days),
+    )
+
+
+
+def hash_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def create_access_token(user_id: int, session_id: str) -> str:
+    now = datetime.now(timezone.utc)
+
+    payload = {
+        "sub": str(user_id),
+        "sid": session_id,
+        "type": "access",
+        "iat": now,
+        "exp": now + timedelta(minutes=settings.access_token_expire_minutes),
+        "jti": secrets.token_urlsafe(16),
+    }
+
+    return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+
+
+def create_refresh_token(user_id: int, session_id: str) -> str:
+    now = datetime.now(timezone.utc)
+
+    payload = {
+        "sub": str(user_id),
+        "sid": session_id,
+        "type": "refresh",
+        "iat": now,
+        "exp": now + timedelta(days=settings.refresh_token_expire_days),
+        "jti": secrets.token_urlsafe(16),
+    }
+
+    return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+
+
+def decode_token(token: str, *, verify_exp: bool = True) -> dict[str, Any]:
+    return jwt.decode(
+        token,
+        settings.jwt_secret_key,
+        algorithms=[settings.jwt_algorithm],
+        options={"require": ["sub", "sid", "type", "iat", "exp", "jti"], "verify_exp": verify_exp},
     )
