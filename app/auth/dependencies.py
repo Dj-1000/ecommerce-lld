@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 import logging
 from typing import Annotated
 
@@ -9,6 +10,7 @@ from redis.exceptions import RedisError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.models import RefreshSession
 from app.auth.utils import decode_token
 from app.core.redis import get_redis  
 from app.db.session import get_db
@@ -70,6 +72,19 @@ async def get_current_user(
     user = result.scalar_one_or_none()
 
     if user is None or not user.is_active or not user.email_verified:
+        raise _unauthorized()
+    
+    result = await db.execute(
+        select(RefreshSession.id)
+        .where(
+            RefreshSession.session_id == session_id,
+            RefreshSession.revoked_at.is_(None),
+            RefreshSession.expires_at > datetime.now(timezone.utc),
+        )
+        .limit(1)
+    )
+
+    if result.scalar_one_or_none() is None:
         raise _unauthorized()
 
     return user
