@@ -1,9 +1,12 @@
-import redis.asyncio as redis
+from fastapi import HTTPException, Request, status
+from redis.asyncio import Redis
 
-from app.core.config import settings
 
-
-redis_client = redis.from_url(
-    settings.redis_url,
-    decode_responses=True,
-)
+def get_redis(request: Request) -> Redis:
+    redis = getattr(request.app.state, "redis", None)
+    if redis is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication service is temporarily unavailable.",
+        )
+    return redis

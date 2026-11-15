@@ -55,8 +55,22 @@ class LoginRateLimiter:
             pipe.expire(key, policy.window_seconds)
             pipe.zcard(key)
         results = await pipe.execute()
+
+        # print(f"Pipeline results: {results}")
+
+        counts = {
+            "account": int(results[3]),
+            "ip": int(results[7]),
+            "pair": int(results[11]),
+        }
+
+        # print(f"Failure counts: {counts}")
+
         counts = {"account": int(results[3]), "ip": int(results[7]), "pair": int(results[11])}
         locked = any(counts[s] >= policies[s].max_attempts for s in policies)
+
+        print(f"Lock status: {locked}")
+
         if locked:
             lock_pipe = self.redis.pipeline(transaction=True)
             for key in (k["lock_account"], k["lock_ip"], k["lock_pair"]):

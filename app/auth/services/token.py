@@ -1,4 +1,3 @@
-import logging
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
@@ -11,11 +10,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import RefreshSession
 from app.auth.schemas import TokenResponse
-from app.auth.utils import create_access_token, create_refresh_token, decode_token, hash_token
+from app.auth.utils import (
+    create_access_token,
+    create_refresh_token,
+    decode_token,
+    hash_token,
+)
 from app.core.config import settings
-from app.users.models import User
-
 from app.core.logger import logger
+from app.users.models import User
 
 SESSION_KEY_PREFIX = "auth:session:"
 
@@ -36,24 +39,51 @@ def _refresh_expiry() -> datetime:
     return datetime.now(timezone.utc) + timedelta(days=settings.refresh_token_expire_days)
 
 
+def _token_response(user: User, session_id: str, refresh_token: str) -> TokenResponse:
+    return TokenResponse(
+        access_token=create_access_token(user.id, session_id),
+        refresh_token=refresh_token,
+        token_type="bearer",
+        expires_in=settings.access_token_expire_minutes * 60,
+    )
+
+
+async def _revoke_session(
+    db: AsyncSession,
+    session_id: str,
+    revoked_at: datetime,
+) -> None:
+    await db.execute(
+        update(RefreshSession)
+        .where(
+            RefreshSession.session_id == session_id,
+            RefreshSession.revoked_at.is_(None),
+        )
+        .values(revoked_at=revoked_at)
+    )
+    await db.commit()
+
+
 async def issue_token_pair(*, user: User, db: AsyncSession, redis: Redis) -> TokenResponse:
     session_id = str(uuid4())
     refresh_token = create_refresh_token(user.id, session_id)
     token_hash = hash_token(refresh_token)
     expires_at = _refresh_expiry()
 
-    db.add(RefreshSession(session_id=session_id, user_id=user.id, token_hash=token_hash, expires_at=expires_at))
+    db.add(
+        RefreshSession(
+            session_id=session_id,
+            user_id=user.id,
+            token_hash=token_hash,
+            expires_at=expires_at,
+        )
+    )
     await db.commit()
 
     try:
         await redis.set(_session_key(session_id), str(user.id), ex=settings.refresh_token_expire_days * 86400)
     except RedisError as exc:
-        await db.execute(
-            update(RefreshSession)
-            .where(RefreshSession.session_id == session_id, RefreshSession.revoked_at.is_(None))
-            .values(revoked_at=datetime.now(timezone.utc))
-        )
-        await db.commit()
+        await _revoke_session(db, session_id, datetime.now(timezone.utc))
 
         logger.exception(f"Failed to create Redis session {session_id}")
         raise HTTPException(
@@ -61,12 +91,7 @@ async def issue_token_pair(*, user: User, db: AsyncSession, redis: Redis) -> Tok
             detail="Authentication service temporarily unavailable.",
         ) from exc
 
-    return TokenResponse(
-        access_token=create_access_token(user.id, session_id),
-        refresh_token=refresh_token,
-        token_type="bearer",
-        expires_in=settings.access_token_expire_minutes * 60,
-    )
+    return _token_response(user, session_id, refresh_token)
 
 
 async def refresh_token_pair(*, refresh_token: str, db: AsyncSession, redis: Redis) -> TokenResponse:
@@ -86,7 +111,11 @@ async def refresh_token_pair(*, refresh_token: str, db: AsyncSession, redis: Red
 
     token_hash = hash_token(refresh_token)
 
-    result = await db.execute(select(RefreshSession).where(RefreshSession.token_hash == token_hash).with_for_update())
+    result = await db.execute(
+        select(RefreshSession)
+        .where(RefreshSession.token_hash == token_hash)
+        .with_for_update()
+    )
     old_session = result.scalar_one_or_none()
 
     if old_session is None or old_session.session_id != session_id:
@@ -95,12 +124,7 @@ async def refresh_token_pair(*, refresh_token: str, db: AsyncSession, redis: Red
     now = datetime.now(timezone.utc)
 
     if old_session.revoked_at is not None:
-        await db.execute(
-            update(RefreshSession)
-            .where(RefreshSession.session_id == session_id, RefreshSession.revoked_at.is_(None))
-            .values(revoked_at=now)
-        )
-        await db.commit()
+        await _revoke_session(db, session_id, now)
 
         await redis.delete(_session_key(session_id))
         logger.warning(f"Detected reuse of revoked refresh token for session {session_id}")
@@ -132,18 +156,20 @@ async def refresh_token_pair(*, refresh_token: str, db: AsyncSession, redis: Red
     old_session.revoked_at = now
     old_session.replaced_by_token_hash = new_token_hash
 
-    db.add(RefreshSession(session_id=session_id, user_id=user.id, token_hash=new_token_hash, expires_at=new_expires_at))
+    db.add(
+        RefreshSession(
+            session_id=session_id,
+            user_id=user.id,
+            token_hash=new_token_hash,
+            expires_at=new_expires_at,
+        )
+    )
     await db.commit()
 
     try:
         await redis.set(_session_key(session_id), str(user.id), ex=settings.refresh_token_expire_days * 86400)
     except RedisError as exc:
-        await db.execute(
-            update(RefreshSession)
-            .where(RefreshSession.session_id == session_id, RefreshSession.revoked_at.is_(None))
-            .values(revoked_at=datetime.now(timezone.utc))
-        )
-        await db.commit()
+        await _revoke_session(db, session_id, datetime.now(timezone.utc))
         await redis.delete(_session_key(session_id))
 
         logger.exception(f"Failed to renew Redis session {session_id}")
@@ -152,12 +178,7 @@ async def refresh_token_pair(*, refresh_token: str, db: AsyncSession, redis: Red
             detail="Authentication service temporarily unavailable.",
         ) from exc
 
-    return TokenResponse(
-        access_token=create_access_token(user.id, session_id),
-        refresh_token=new_refresh_token,
-        token_type="bearer",
-        expires_in=settings.access_token_expire_minutes * 60,
-    )
+    return _token_response(user, session_id, new_refresh_token)
 
 
 async def logout_session(*, refresh_token: str, db: AsyncSession, redis: Redis) -> None:
@@ -177,19 +198,17 @@ async def logout_session(*, refresh_token: str, db: AsyncSession, redis: Redis) 
     token_hash = hash_token(refresh_token)
 
     result = await db.execute(
-        select(RefreshSession).where(RefreshSession.token_hash == token_hash, RefreshSession.session_id == session_id)
+        select(RefreshSession).where(
+            RefreshSession.token_hash == token_hash,
+            RefreshSession.session_id == session_id,
+        )
     )
     refresh_session = result.scalar_one_or_none()
 
     if refresh_session is None:
         raise _unauthorized()
 
-    await db.execute(
-        update(RefreshSession)
-        .where(RefreshSession.session_id == session_id, RefreshSession.revoked_at.is_(None))
-        .values(revoked_at=datetime.now(timezone.utc))
-    )
-    await db.commit()
+    await _revoke_session(db, session_id, datetime.now(timezone.utc))
 
     try:
         await redis.delete(_session_key(session_id))

@@ -202,7 +202,7 @@ async def login_user(
     result = await db.execute(
         select(User).where(User.email == email)
     )
-    user = result.scalar_one_or_none()
+    user: User = result.scalar_one_or_none()
     
     password_ok = bool(
         user is not None
@@ -235,7 +235,6 @@ async def login_user(
             detail="This account is inactive.",
         )
 
-    subject = str(user.id)
 
     return await issue_token_pair(
         user=user,

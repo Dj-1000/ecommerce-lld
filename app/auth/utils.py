@@ -1,6 +1,8 @@
 import jwt
 import secrets
 import hashlib
+import secrets
+import hashlib
 from typing import Any
 
 from argon2 import PasswordHasher
@@ -31,21 +33,6 @@ def create_token(*, subject: str, token_type: str, expires_delta: timedelta) -> 
         "sub": subject, "type": token_type, "iat": now, "exp": now + expires_delta
     }
     return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
-
-
-def create_access_token(subject: str) -> str:
-    return create_token(
-        subject=subject, token_type="access",
-        expires_delta=timedelta(minutes=settings.access_token_expire_minutes),
-    )
-
-
-def create_refresh_token(subject: str) -> str:
-    return create_token(
-        subject=subject, token_type="refresh",
-        expires_delta=timedelta(days=settings.refresh_token_expire_days),
-    )
-
 
 
 def hash_token(token: str) -> str:
