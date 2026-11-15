@@ -5,7 +5,7 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.services.token import logout_session, refresh_token_pair
-from app.core.redis import get_redis
+from app.infra.redis import get_redis
 from app.auth.email_service import send_verification_email
 from app.auth.schemas import (
     LoginRequest,

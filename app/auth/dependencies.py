@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import RefreshSession
 from app.auth.utils import decode_token
-from app.core.redis import get_redis  
+from app.infra.redis import get_redis  
 from app.db.session import get_db
 from app.users.models import User
 
