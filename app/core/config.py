@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     app_env: str = "development"
     frontend_url: str = "http://localhost:8000"
 
-    email_backend: str = "console"
+    email_backend: str = "console"  ## console for development, smtp for prod
     email_verification_expire_hours: int = 24
 
     smtp_host: str | None = None

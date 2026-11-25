@@ -126,7 +126,6 @@ async def login(
     db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ) -> SuccessResponse[TokenResponse]:
-) -> SuccessResponse[TokenResponse]:
     ip_address = request.client.host if request.client else "unknown"
 
     token_response = await login_user(
@@ -184,60 +183,5 @@ async def logout(
     return SuccessResponse(
         message="Logged out successfully.",
         data={},
-
-    token_response = await login_user(
-        payload=payload,
-        db=db,
-        redis=redis,
-        ip_address=ip_address,
     )
-
-    return SuccessResponse(
-        message="Login successful.",
-        data=token_response,
-    )
-
-
-
-@router.post(
-    "/refresh",
-    response_model=SuccessResponse[TokenResponse],
-)
-async def refresh_tokens(
-    payload: RefreshRequest,
-    db: AsyncSession = Depends(get_db),
-    redis: Redis = Depends(get_redis),
-) -> SuccessResponse[TokenResponse]:
-    
-    tokens = await refresh_token_pair(
-        refresh_token=payload.refresh_token,
-        db=db,
-        redis=redis,
-    )
-
-    return SuccessResponse(
-        message="Tokens refreshed successfully.",
-        data=tokens,
-    )
-
-
-@router.post(
-    "/logout",
-    response_model=SuccessResponse[dict],
-)
-async def logout(
-    payload: LogoutRequest,
-    db: AsyncSession = Depends(get_db),
-    redis: Redis = Depends(get_redis),
-) -> SuccessResponse[dict]:
-    
-    await logout_session(
-        refresh_token=payload.refresh_token,
-        db=db,
-        redis=redis,
-    )
-
-    return SuccessResponse(
-        message="Logged out successfully.",
-        data={},
-    )
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        
